@@ -108,9 +108,9 @@ if st.button("🔍 评估运损风险", use_container_width=True):
     X_new = pd.DataFrame([{
         "const": 1,
         "weight": weight,
-        "girth": girth,
-        "len_ratio": len_ratio,
-        "V": V
+        "L": L,
+        "W": W,
+        "H": H
     }])
 
     pred_loss = inv_logit(loss_model.predict(X_new)[0])
