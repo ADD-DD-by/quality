@@ -46,7 +46,7 @@ cols = [
 # =========================
 if "train_df" not in st.session_state:
     df = pd.DataFrame(data, columns=cols)
-    df["len_ratio"] = df["pkg_len"] / df["girth"]
+    df["len_ratio"] = df["L"] / df["girth"]
     st.session_state.train_df = df.copy()
 
 # =========================
