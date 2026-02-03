@@ -40,7 +40,7 @@ cols = [
     "girth",          # 围长
 ]
 
-FEATURE_COLS = ["weight", "girth", "len_ratio", "V"]
+FEATURE_COLS = ["weight", "L", "W", "H"]
 
 
 # =========================
