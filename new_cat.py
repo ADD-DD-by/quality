@@ -148,11 +148,18 @@ if selected_styles:
 # =========================
 # KPI
 # =========================
+def _clean_key_series(s: pd.Series) -> pd.Series:
+    s = s.astype(str).str.strip()
+    s = s.replace({"": np.nan, "-": np.nan, "nan": np.nan, "None": np.nan})
+    s = s.str.upper()
+    return s
+
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("订单数", df["订单参考号"].nunique())
-c2.metric("ERP SKU 数", df["erp sku"].nunique())
+c1.metric("订单数", int(df["订单参考号"].nunique()))
+c2.metric("ERP SKU 数", int(_clean_key_series(df["erp sku"]).nunique(dropna=True)))
 c3.metric("问题数", int(df["问题数"].sum()))
-c4.metric("款式数", df["erpsku款式名称"].nunique())
+c4.metric("款式数", int(df["erpsku款式名称"].nunique()))
+
 
 st.divider()
 
@@ -162,15 +169,31 @@ st.divider()
 st.subheader("🚨 款式风险识别表（按客诉率倒排）")
 
 tmp = df.copy()
-tmp["_pair"] = tmp["订单参考号"].astype(str) + "||" + tmp["erp sku"].astype(str)
 
+# 1️⃣ 构造组合键
+tmp["_pair"] = (
+    tmp["订单参考号"].astype(str)
+    + "||"
+    + tmp["erp sku"].astype(str)
+)
+
+# 2️⃣ 先在 pair 粒度去重（非常关键）
+pair_level = (
+    tmp
+    .sort_values("_pair")              # 可选，保证稳定
+    .drop_duplicates("_pair")          # 只保留每个 订单+sku 一条
+)
+
+# 3️⃣ 再按款式聚合
 style_risk = (
-    tmp.groupby("erpsku款式名称", as_index=False)
+    pair_level
+    .groupby("erpsku款式名称", as_index=False)
     .agg(
-        数量=("_pair", "nunique"),
+        数量=("数量", "sum"),           # ✅ 去重后再加和
         问题数=("问题数", "sum")
     )
 )
+
 style_risk["客诉率(%)"] = (style_risk["问题数"] / style_risk["数量"] * 100).round(2)
 style_risk = style_risk.sort_values("客诉率(%)", ascending=False)
 
