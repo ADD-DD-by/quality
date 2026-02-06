@@ -77,7 +77,7 @@ def _make_beautiful_pie(df, name_col, value_col, title, max_categories=10):
 # =========================
 # 页面标题
 # =========================
-st.title("v0.7 款式客诉分析看板")
+st.title("📌 v0.7 款式客诉分析看板")
 
 # =========================
 # Sidebar：文件上传 + 全局筛选
@@ -87,21 +87,17 @@ with st.sidebar:
     main_file = st.file_uploader("主数据 Excel", type=["xlsx", "xls"])
 
     st.divider()
-    extra_file = st.file_uploader("改进方案 / 其他表（原样展示）", type=["xlsx", "xls"], key="extra")
-
-# =========================
-# 额外表展示（不参与筛选）
-# =========================
-if extra_file is not None:
-    st.subheader("📎 其他数据表（原样展示）")
-    st.dataframe(pd.read_excel(extra_file), use_container_width=True, height=480)
-    st.divider()
+    extra_file = st.file_uploader(
+        "额外数据表（仅展示，不参与分析）",
+        type=["xlsx", "xls"],
+        key="extra"
+    )
 
 # =========================
 # 主数据
 # =========================
 if main_file is None:
-    st.warning("请先上传主数据")
+    st.warning("请先上传主数据 Excel")
     st.stop()
 
 raw = pd.read_excel(main_file)
@@ -112,12 +108,11 @@ raw["_order_time"] = _try_parse_datetime(raw["平台订单时间(day)"])
 raw["问题数"] = pd.to_numeric(raw["问题数"], errors="coerce").fillna(0)
 
 # =========================
-# 全局筛选（核心）
+# 全局筛选
 # =========================
 with st.sidebar:
     st.header("② 全局筛选")
 
-    # 时间
     if raw["_order_time"].notna().any():
         min_d, max_d = raw["_order_time"].min(), raw["_order_time"].max()
         date_range = st.date_input(
@@ -128,11 +123,9 @@ with st.sidebar:
         date_range = None
         st.info("时间字段无法解析，已跳过时间筛选")
 
-    # 站点
     site_opts = sorted(raw["站点"].dropna().unique())
     selected_sites = st.multiselect("站点", site_opts, default=site_opts)
 
-    # 款式
     style_opts = sorted(raw["erpsku款式名称"].dropna().unique())
     selected_styles = st.multiselect("款式（erpsku款式名称）", style_opts, default=style_opts)
 
@@ -164,7 +157,7 @@ c4.metric("款式数", df["erpsku款式名称"].nunique())
 st.divider()
 
 # =========================
-# 款式风险识别表（全局筛选后）
+# 款式风险识别表
 # =========================
 st.subheader("🚨 款式风险识别表（按客诉率倒排）")
 
@@ -186,16 +179,15 @@ st.dataframe(style_risk, use_container_width=True, height=420)
 st.divider()
 
 # =========================
-# 一级 → 二级 联动（基于全局筛选后）
+# 一级 → 二级 联动分析
 # =========================
-st.subheader("一级 → 二级问题联动分析")
+st.subheader("🎯 一级 → 二级问题联动分析")
 
 level1_opts = ["全部"] + sorted(df["一级问题名称"].dropna().unique())
 selected_l1 = st.selectbox("选择一级问题", level1_opts)
 
 df_l1 = df if selected_l1 == "全部" else df[df["一级问题名称"] == selected_l1]
 
-# 饼图
 col1, col2 = st.columns(2)
 
 with col1:
@@ -209,30 +201,6 @@ with col2:
     if fig2:
         st.plotly_chart(fig2, use_container_width=True)
 
-# 排行
-col1, col2 = st.columns(2)
-
-with col1:
-    st.markdown("#### 一级问题 Top10（全量）")
-    st.dataframe(
-        df.groupby("一级问题名称", as_index=False)
-        .agg(问题数=("问题数", "sum"))
-        .sort_values("问题数", ascending=False)
-        .head(10),
-        use_container_width=True
-    )
-
-with col2:
-    subtitle = "全部" if selected_l1 == "全部" else selected_l1
-    st.markdown(f"#### 二级问题 Top10（{subtitle}）")
-    st.dataframe(
-        df_l1.groupby("二级问题名称", as_index=False)
-        .agg(问题数=("问题数", "sum"))
-        .sort_values("问题数", ascending=False)
-        .head(10),
-        use_container_width=True
-    )
-
 st.divider()
 
 # =========================
@@ -240,3 +208,15 @@ st.divider()
 # =========================
 with st.expander("📋 查看明细（受全局 + 一级问题筛选）"):
     st.dataframe(df_l1, use_container_width=True, height=500)
+
+# =========================
+# ✅ 额外数据表（最终放在最下面）
+# =========================
+if extra_file is not None:
+    st.divider()
+    st.subheader("📎 额外数据表（仅展示，不参与任何筛选与分析）")
+    st.dataframe(
+        pd.read_excel(extra_file),
+        use_container_width=True,
+        height=500
+    )
