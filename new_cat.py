@@ -199,11 +199,17 @@ def _create_problem_hierarchy_chart(filtered_df):
     # 创建桑基图
     fig = go.Figure(data=[go.Sankey(
         node=dict(
-            pad=15,
-            thickness=20,
+            pad=18,
+            thickness=22,
             line=dict(color="black", width=0.5),
             label=all_nodes,
-            color=px.colors.qualitative.Set3[:len(all_nodes)]
+            color=px.colors.qualitative.Set3[:len(all_nodes)],
+            # 👇 关键：字体更大 + 不加粗
+            font=dict(
+                size=14,        # 字体变大
+                family="Arial, sans-serif",
+                color="#333"
+            )
         ),
         link=dict(
             source=source,
@@ -215,17 +221,20 @@ def _create_problem_hierarchy_chart(filtered_df):
     
     fig.update_layout(
         title=dict(
-            text="问题层级流向图（一级问题 → 二级问题）",
-            font=dict(size=16),
+            text="问题层级关系图（一级问题 → 二级问题）",
+            font=dict(size=18),  # 标题大一点
             x=0.5,
             xanchor="center"
         ),
-        font=dict(size=10),
-        margin=dict(t=50, b=20, l=20, r=20),
-        height=500
+        font=dict(
+            size=13,            # 整体字体变大
+            family="Arial, sans-serif",
+            color="#333"
+        ),
+        margin=dict(t=60, b=20, l=20, r=20),
+        height=520
     )
-    
-    return fig
+
 
 # =========================
 # 页面
@@ -483,6 +492,51 @@ else:
     st.info("暂无层级关系数据")
 
 st.divider()
+
+# =========================
+# 一级 / 二级问题数排行
+# =========================
+st.subheader("🏷️ 问题数排行")
+
+rank_col1, rank_col2 = st.columns(2)
+
+with rank_col1:
+    st.markdown("#### 一级问题数排行（Top 10）")
+    l1_rank = (
+        filtered.groupby("一级问题名称", as_index=False)
+        .agg(问题数=("问题数", "sum"))
+        .sort_values("问题数", ascending=False)
+        .head(10)
+    )
+    l1_rank["问题数"] = l1_rank["问题数"].astype(int)
+    st.dataframe(
+        l1_rank,
+        use_container_width=True,
+        height=360,
+    )
+
+with rank_col2:
+    st.markdown("#### 二级问题数排行（Top 10）")
+    l2_rank = (
+        filtered.groupby("二级问题名称", as_index=False)
+        .agg(问题数=("问题数", "sum"))
+        .sort_values("问题数", ascending=False)
+        .head(10)
+    )
+    l2_rank["问题数"] = l2_rank["问题数"].astype(int)
+    st.dataframe(
+        l2_rank,
+        use_container_width=True,
+        height=360,
+    )
+
+
+
+
+
+
+
+
 
 # =========================
 # 明细展示
