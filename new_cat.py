@@ -196,6 +196,7 @@ def _create_problem_hierarchy_chart(filtered_df):
             color=px.colors.qualitative.Set3 * (len(all_nodes) // len(px.colors.qualitative.Set3) + 1)
         ),
         link=dict(
+            color="rgba(160,160,160,0.35)"  ,
             source=source,
             target=target,
             value=value,
@@ -214,7 +215,7 @@ def _create_problem_hierarchy_chart(filtered_df):
         font=dict(
             size=14,                 # 字体更大
             family="Arial, sans-serif",
-            color="#333"
+            color="#555"
         ),
         margin=dict(t=60, b=20, l=20, r=20),
         height=520
@@ -227,7 +228,7 @@ def _create_problem_hierarchy_chart(filtered_df):
 # =========================
 # 页面
 # =========================
-st.title("📌 v0.7 款式客诉分析")
+st.title("v0.7 款式客诉分析")
 st.markdown("""
 - **全局筛选**：时间范围（按 平台订单时间(day)）、站点、erpsku款式名称（多选）
 - **图表交互**：所有图表均可悬停查看详情，点击图例可筛选
