@@ -80,23 +80,21 @@ def _make_beautiful_pie(df, name_col, value_col, title, max_categories=10):
 st.title("v0.7 款式客诉分析看板")
 
 # =========================
-# Sidebar：文件上传
+# Sidebar：文件上传 + 全局筛选
 # =========================
 with st.sidebar:
-    st.header("① 上传主数据")
+    st.header("① 上传数据")
     main_file = st.file_uploader("主数据 Excel", type=["xlsx", "xls"])
 
     st.divider()
-    st.header("② 上传其他表（原样展示）")
-    extra_file = st.file_uploader("改进方案 / 其他数据", type=["xlsx", "xls"], key="extra")
+    extra_file = st.file_uploader("改进方案 / 其他表（原样展示）", type=["xlsx", "xls"], key="extra")
 
 # =========================
-# 额外表展示（保留）
+# 额外表展示（不参与筛选）
 # =========================
 if extra_file is not None:
-    extra_df = pd.read_excel(extra_file)
     st.subheader("📎 其他数据表（原样展示）")
-    st.dataframe(extra_df, use_container_width=True, height=500)
+    st.dataframe(pd.read_excel(extra_file), use_container_width=True, height=480)
     st.divider()
 
 # =========================
@@ -106,11 +104,53 @@ if main_file is None:
     st.warning("请先上传主数据")
     st.stop()
 
-df = pd.read_excel(main_file)
+raw = pd.read_excel(main_file)
 
-df = df[_starts_with_v07(df["erpsku款式名称"])].copy()
-df["_order_time"] = _try_parse_datetime(df["平台订单时间(day)"])
-df["问题数"] = pd.to_numeric(df["问题数"], errors="coerce").fillna(0)
+# v0.7 强制筛选
+raw = raw[_starts_with_v07(raw["erpsku款式名称"])].copy()
+raw["_order_time"] = _try_parse_datetime(raw["平台订单时间(day)"])
+raw["问题数"] = pd.to_numeric(raw["问题数"], errors="coerce").fillna(0)
+
+# =========================
+# 全局筛选（核心）
+# =========================
+with st.sidebar:
+    st.header("② 全局筛选")
+
+    # 时间
+    if raw["_order_time"].notna().any():
+        min_d, max_d = raw["_order_time"].min(), raw["_order_time"].max()
+        date_range = st.date_input(
+            "平台订单时间范围",
+            value=(min_d.date(), max_d.date())
+        )
+    else:
+        date_range = None
+        st.info("时间字段无法解析，已跳过时间筛选")
+
+    # 站点
+    site_opts = sorted(raw["站点"].dropna().unique())
+    selected_sites = st.multiselect("站点", site_opts, default=site_opts)
+
+    # 款式
+    style_opts = sorted(raw["erpsku款式名称"].dropna().unique())
+    selected_styles = st.multiselect("款式（erpsku款式名称）", style_opts, default=style_opts)
+
+# 应用全局筛选
+df = raw.copy()
+
+if date_range and raw["_order_time"].notna().any():
+    start, end = date_range
+    df = df[
+        (df["_order_time"] >= pd.to_datetime(start)) &
+        (df["_order_time"] <= pd.to_datetime(end) + pd.Timedelta(days=1))
+    ]
+
+if selected_sites:
+    df = df[df["站点"].isin(selected_sites)]
+
+if selected_styles:
+    df = df[df["erpsku款式名称"].isin(selected_styles)]
 
 # =========================
 # KPI
@@ -124,9 +164,9 @@ c4.metric("款式数", df["erpsku款式名称"].nunique())
 st.divider()
 
 # =========================
-# ⭐ 款式风险识别表（你说缺的那张）
+# 款式风险识别表（全局筛选后）
 # =========================
-st.subheader("🚨 款式客诉统计表")
+st.subheader("🚨 款式风险识别表（按客诉率倒排）")
 
 tmp = df.copy()
 tmp["_pair"] = tmp["订单参考号"].astype(str) + "||" + tmp["erp sku"].astype(str)
@@ -138,11 +178,7 @@ style_risk = (
         问题数=("问题数", "sum")
     )
 )
-
-style_risk["客诉率(%)"] = (
-    style_risk["问题数"] / style_risk["数量"] * 100
-).round(2)
-
+style_risk["客诉率(%)"] = (style_risk["问题数"] / style_risk["数量"] * 100).round(2)
 style_risk = style_risk.sort_values("客诉率(%)", ascending=False)
 
 st.dataframe(style_risk, use_container_width=True, height=420)
@@ -150,47 +186,30 @@ st.dataframe(style_risk, use_container_width=True, height=420)
 st.divider()
 
 # =========================
-# 一级 → 二级 联动分析
+# 一级 → 二级 联动（基于全局筛选后）
 # =========================
 st.subheader("一级 → 二级问题联动分析")
 
 level1_opts = ["全部"] + sorted(df["一级问题名称"].dropna().unique())
-selected_l1 = st.selectbox(
-    "选择一级问题（驱动下方二级分析）",
-    level1_opts
-)
+selected_l1 = st.selectbox("选择一级问题", level1_opts)
 
-if selected_l1 == "全部":
-    df_l1 = df.copy()
-else:
-    df_l1 = df[df["一级问题名称"] == selected_l1]
+df_l1 = df if selected_l1 == "全部" else df[df["一级问题名称"] == selected_l1]
 
-# =========================
-# 饼图联动
-# =========================
+# 饼图
 col1, col2 = st.columns(2)
 
 with col1:
-    fig1 = _make_beautiful_pie(
-        df, "一级问题名称", "问题数", "一级问题分布（全量）"
-    )
+    fig1 = _make_beautiful_pie(df, "一级问题名称", "问题数", "一级问题分布（全量）")
     if fig1:
         st.plotly_chart(fig1, use_container_width=True)
 
 with col2:
-    title = "二级问题分布"
-    if selected_l1 != "全部":
-        title += f"（一级问题：{selected_l1}）"
-
-    fig2 = _make_beautiful_pie(
-        df_l1, "二级问题名称", "问题数", title
-    )
+    title = "二级问题分布" if selected_l1 == "全部" else f"二级问题分布（一级：{selected_l1}）"
+    fig2 = _make_beautiful_pie(df_l1, "二级问题名称", "问题数", title)
     if fig2:
         st.plotly_chart(fig2, use_container_width=True)
 
-# =========================
-# 排行表联动
-# =========================
+# 排行
 col1, col2 = st.columns(2)
 
 with col1:
@@ -204,7 +223,7 @@ with col1:
     )
 
 with col2:
-    subtitle = "全部一级问题" if selected_l1 == "全部" else f"一级问题：{selected_l1}"
+    subtitle = "全部" if selected_l1 == "全部" else selected_l1
     st.markdown(f"#### 二级问题 Top10（{subtitle}）")
     st.dataframe(
         df_l1.groupby("二级问题名称", as_index=False)
@@ -217,7 +236,7 @@ with col2:
 st.divider()
 
 # =========================
-# 明细联动
+# 明细
 # =========================
-with st.expander("📋 查看明细（随一级问题联动）"):
+with st.expander("📋 查看明细（受全局 + 一级问题筛选）"):
     st.dataframe(df_l1, use_container_width=True, height=500)
