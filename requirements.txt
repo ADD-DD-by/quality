@@ -3,4 +3,5 @@ plotly
 pandas
 numpy
 statsmodels
+openpyxl
 
