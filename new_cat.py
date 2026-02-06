@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+from plotly.subplots import make_subplots  # 你原本有引入，保留不动
 
 st.set_page_config(page_title="v0.7 客诉分析看板", layout="wide")
 
@@ -15,29 +15,33 @@ def _try_parse_datetime(s: pd.Series) -> pd.Series:
     """解析时间字段，优先支持 YYYYMMDD（如 20260102），失败再用自动解析兜底"""
     if s is None:
         return s
-    
+
     # 先按 YYYYMMDD 强制解析
     out = pd.to_datetime(s, format="%Y%m%d", errors="coerce")
-    
+
     # 未解析成功的再自动兜底
     mask = out.isna()
     if mask.any():
         out.loc[mask] = pd.to_datetime(
             s.loc[mask], errors="coerce", infer_datetime_format=True
         )
-    
+
     return out
+
 
 def _read_excel(uploaded_file) -> pd.DataFrame:
     return pd.read_excel(uploaded_file)
 
+
 def _safe_str_series(s: pd.Series) -> pd.Series:
     return s.astype(str).fillna("")
+
 
 def _starts_with_v07(s: pd.Series) -> pd.Series:
     # 以 v0.7 开头（忽略大小写、前后空格）
     t = _safe_str_series(s).str.strip().str.lower()
     return t.str.startswith("v0.7")
+
 
 def _make_beautiful_pie(df: pd.DataFrame, name_col: str, value_col: str, title: str, max_categories=10):
     """
@@ -46,26 +50,26 @@ def _make_beautiful_pie(df: pd.DataFrame, name_col: str, value_col: str, title: 
     tmp = df[[name_col, value_col]].copy()
     tmp[name_col] = tmp[name_col].fillna("未填写")
     tmp[value_col] = pd.to_numeric(tmp[value_col], errors="coerce").fillna(0)
-    
+
     # 分组汇总
     grouped = (
         tmp.groupby(name_col, as_index=False)[value_col]
         .sum()
         .sort_values(value_col, ascending=False)
     )
-    
+
     total_value = grouped[value_col].sum()
-    
+
     if total_value <= 0:
         st.info(f"{title}：当前筛选下 {value_col} 全为 0 / 空，无法绘图。")
         return None
-    
+
     # 如果类别太多，合并小类别为"其他"
     if len(grouped) > max_categories:
         top_n = grouped.iloc[:max_categories-1]
         others = grouped.iloc[max_categories-1:]
         others_sum = others[value_col].sum()
-        
+
         if others_sum > 0:
             others_row = pd.DataFrame({
                 name_col: ["其他"],
@@ -74,43 +78,33 @@ def _make_beautiful_pie(df: pd.DataFrame, name_col: str, value_col: str, title: 
             grouped = pd.concat([top_n, others_row], ignore_index=True)
         else:
             grouped = top_n
-    
+
     # 使用专业的配色方案（Plotly 默认的 Set3 色系，适合分类数据）
     colors = px.colors.qualitative.Set3
-    
+
     # 创建饼图
     fig = go.Figure()
-    
-    # 使用自定义的标签格式
+
     labels = grouped[name_col].tolist()
     values = grouped[value_col].tolist()
-    
-    # 计算百分比
-    percentages = [(v / total_value * 100) for v in values]
-    
-    # 创建悬浮文本
-    hover_texts = []
-    for label, value, pct in zip(labels, values, percentages):
-        hover_texts.append(f"{label}<br>问题数: {value:,.0f}<br>占比: {pct:.1f}%")
-    
-    # 添加饼图
+
     fig.add_trace(go.Pie(
         labels=labels,
         values=values,
         hoverinfo="text",
-        text=labels,  # 在饼图上显示标签
-        textinfo="percent+label",  # 显示百分比和标签
-        textposition="inside",  # 文字在内部
-        insidetextorientation="radial",  # 文字径向排列
-        hole=0.4,  # 甜甜圈图，中间留空
+        text=labels,
+        textinfo="percent+label",
+        textposition="inside",
+        insidetextorientation="radial",
+        hole=0.4,
         marker=dict(
-            colors=colors[:len(labels)],  # 使用配色
-            line=dict(color='white', width=2)  # 白色边框
+            colors=colors[:len(labels)],
+            line=dict(color='white', width=2)
         ),
         hovertemplate="%{text}<br>问题数: %{value:,.0f}<br>占比: %{percent:.1%}<extra></extra>",
-        sort=False  # 保持排序顺序
+        sort=False
     ))
-    
+
     # 美化布局
     fig.update_layout(
         title=dict(
@@ -131,9 +125,9 @@ def _make_beautiful_pie(df: pd.DataFrame, name_col: str, value_col: str, title: 
             bordercolor="lightgray",
             borderwidth=1
         ),
-        margin=dict(t=50, b=20, l=20, r=150),  # 右侧留空间给图例
-        paper_bgcolor="rgba(0,0,0,0)",  # 透明背景
-        plot_bgcolor="rgba(0,0,0,0)",  # 透明背景
+        margin=dict(t=50, b=20, l=20, r=150),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
         annotations=[
             dict(
                 text=f"总计: {total_value:,.0f}",
@@ -144,8 +138,7 @@ def _make_beautiful_pie(df: pd.DataFrame, name_col: str, value_col: str, title: 
             )
         ]
     )
-    
-    # 更新饼图的文字字体
+
     fig.update_traces(
         textfont=dict(
             size=11,
@@ -153,8 +146,9 @@ def _make_beautiful_pie(df: pd.DataFrame, name_col: str, value_col: str, title: 
         ),
         outsidetextfont=dict(size=10)
     )
-    
+
     return fig
+
 
 def _create_problem_hierarchy_chart(filtered_df):
     """
@@ -162,54 +156,44 @@ def _create_problem_hierarchy_chart(filtered_df):
     """
     if len(filtered_df) == 0:
         return None
-    
+
     # 准备数据
     tmp = filtered_df.copy()
     tmp["一级问题名称"] = tmp["一级问题名称"].fillna("未填写")
     tmp["二级问题名称"] = tmp["二级问题名称"].fillna("未填写")
     tmp["问题数"] = pd.to_numeric(tmp["问题数"], errors="coerce").fillna(0)
-    
+
     # 汇总一级到二级的问题数
     hierarchy_df = (
         tmp.groupby(["一级问题名称", "二级问题名称"])
         .agg(问题数=("问题数", "sum"))
         .reset_index()
     )
-    
-    # 过滤掉问题数为0的行
+
     hierarchy_df = hierarchy_df[hierarchy_df["问题数"] > 0]
-    
     if len(hierarchy_df) == 0:
         return None
-    
-    # 创建唯一的节点名称
+
+    # 节点
     level1_nodes = hierarchy_df["一级问题名称"].unique().tolist()
     level2_nodes = hierarchy_df["二级问题名称"].unique().tolist()
-    
     all_nodes = level1_nodes + level2_nodes
-    
-    # 创建节点映射
+
     node_indices = {node: i for i, node in enumerate(all_nodes)}
-    
-    # 创建桑基图数据
+
     source = [node_indices[row["一级问题名称"]] for _, row in hierarchy_df.iterrows()]
     target = [node_indices[row["二级问题名称"]] for _, row in hierarchy_df.iterrows()]
     value = [row["问题数"] for _, row in hierarchy_df.iterrows()]
-    
-    # 创建桑基图
+
+    # ✅ 修复点1：node 不支持 font 属性，删除 node.font
     fig = go.Figure(data=[go.Sankey(
+        arrangement="snap",
         node=dict(
             pad=18,
             thickness=22,
             line=dict(color="black", width=0.5),
             label=all_nodes,
-            color=px.colors.qualitative.Set3[:len(all_nodes)],
-            # 👇 关键：字体更大 + 不加粗
-            font=dict(
-                size=14,        # 字体变大
-                family="Arial, sans-serif",
-                color="#333"
-            )
+            color=px.colors.qualitative.Set3 * (len(all_nodes) // len(px.colors.qualitative.Set3) + 1)
         ),
         link=dict(
             source=source,
@@ -218,22 +202,26 @@ def _create_problem_hierarchy_chart(filtered_df):
             hovertemplate="%{source.label} → %{target.label}<br>问题数: %{value:,.0f}<extra></extra>"
         )
     )])
-    
+
+    # ✅ 修复点2：用 layout font 控制整体字体变大（默认不加粗）
     fig.update_layout(
         title=dict(
             text="问题层级关系图（一级问题 → 二级问题）",
-            font=dict(size=18),  # 标题大一点
+            font=dict(size=18, family="Arial, sans-serif"),
             x=0.5,
             xanchor="center"
         ),
         font=dict(
-            size=13,            # 整体字体变大
+            size=14,                 # 字体更大
             family="Arial, sans-serif",
             color="#333"
         ),
         margin=dict(t=60, b=20, l=20, r=20),
         height=520
     )
+
+    # ✅ 别忘了 return
+    return fig
 
 
 # =========================
@@ -248,7 +236,7 @@ st.markdown("""
 with st.sidebar:
     st.header("① 上传主数据（Excel）")
     main_file = st.file_uploader("上传 Excel（主数据）", type=["xlsx", "xls"])
-    
+
     st.divider()
     st.header("② 改进情况数据上传")
     extra_file = st.file_uploader("上传 Excel（额外展示用）", type=["xlsx", "xls"], key="extra")
@@ -315,8 +303,7 @@ if time_parse_ok == 0:
 with st.sidebar:
     st.divider()
     st.header("③ 全局筛选")
-    
-    # 时间范围
+
     if time_parse_ok > 0:
         tmin = df["_order_time"].min()
         tmax = df["_order_time"].max()
@@ -329,12 +316,10 @@ with st.sidebar:
     else:
         date_range = None
         st.info("时间列不可解析，已跳过时间筛选")
-    
-    # 站点
+
     site_options = sorted(df["站点"].dropna().unique().tolist())
     selected_sites = st.multiselect("站点（多选）", site_options, default=site_options)
-    
-    # 款式
+
     style_options = sorted(df["erpsku款式名称"].dropna().unique().tolist())
     selected_styles = st.multiselect("erpsku款式名称（多选）", style_options, default=style_options)
 
@@ -370,33 +355,17 @@ st.subheader("📈 关键指标概览")
 kpi_cols = st.columns(4)
 
 with kpi_cols[0]:
-    st.metric(
-        label="筛选后行数", 
-        value=f"{len(filtered):,}",
-        delta=None
-    )
+    st.metric(label="筛选后行数", value=f"{len(filtered):,}", delta=None)
 
 with kpi_cols[1]:
-    st.metric(
-        label="订单数", 
-        value=f"{filtered['订单参考号'].nunique():,}",
-        delta=None
-    )
+    st.metric(label="订单数", value=f"{filtered['订单参考号'].nunique():,}", delta=None)
 
 with kpi_cols[2]:
-    st.metric(
-        label="ERP SKU 数", 
-        value=f"{filtered['erp sku'].nunique():,}",
-        delta=None
-    )
+    st.metric(label="ERP SKU 数", value=f"{filtered['erp sku'].nunique():,}", delta=None)
 
 with kpi_cols[3]:
     total_problems = filtered["问题数"].sum()
-    st.metric(
-        label="总问题数", 
-        value=f"{total_problems:,.0f}",
-        delta=None
-    )
+    st.metric(label="总问题数", value=f"{total_problems:,.0f}", delta=None)
 
 st.divider()
 
@@ -415,15 +384,12 @@ summary = (
     )
 )
 
-# 客诉率
 summary["erpsku客诉率"] = np.where(
     summary["销售数量"] > 0,
     summary["问题数"] / summary["销售数量"],
     0
 )
 summary["erpsku客诉率"] = summary["erpsku客诉率"].round(4)
-
-# 添加百分比列用于显示
 summary["客诉率(%)"] = (summary["erpsku客诉率"] * 100).round(2)
 
 summary = summary.sort_values(
@@ -431,7 +397,6 @@ summary = summary.sort_values(
     ascending=[False, False, True]
 )
 
-# 格式化显示
 display_summary = summary.copy()
 display_summary["销售数量"] = display_summary["销售数量"].apply(lambda x: f"{x:,}")
 display_summary["问题数"] = display_summary["问题数"].apply(lambda x: f"{x:,}")
@@ -456,14 +421,13 @@ st.divider()
 # =========================
 st.subheader("📊 问题分析")
 
-# 第一行：饼图
 col1, col2 = st.columns(2)
 
 with col1:
     fig1 = _make_beautiful_pie(
-        filtered, 
-        name_col="一级问题名称", 
-        value_col="问题数", 
+        filtered,
+        name_col="一级问题名称",
+        value_col="问题数",
         title="一级问题分布"
     )
     if fig1:
@@ -473,9 +437,9 @@ with col1:
 
 with col2:
     fig2 = _make_beautiful_pie(
-        filtered, 
-        name_col="二级问题名称", 
-        value_col="问题数", 
+        filtered,
+        name_col="二级问题名称",
+        value_col="问题数",
         title="二级问题分布"
     )
     if fig2:
@@ -483,7 +447,6 @@ with col2:
     else:
         st.info("暂无二级问题数据")
 
-# 第二行：桑基图
 st.subheader("🔗 问题层级关系")
 sankey_fig = _create_problem_hierarchy_chart(filtered)
 if sankey_fig:
@@ -509,11 +472,7 @@ with rank_col1:
         .head(10)
     )
     l1_rank["问题数"] = l1_rank["问题数"].astype(int)
-    st.dataframe(
-        l1_rank,
-        use_container_width=True,
-        height=360,
-    )
+    st.dataframe(l1_rank, use_container_width=True, height=360)
 
 with rank_col2:
     st.markdown("#### 二级问题数排行（Top 10）")
@@ -524,19 +483,7 @@ with rank_col2:
         .head(10)
     )
     l2_rank["问题数"] = l2_rank["问题数"].astype(int)
-    st.dataframe(
-        l2_rank,
-        use_container_width=True,
-        height=360,
-    )
-
-
-
-
-
-
-
-
+    st.dataframe(l2_rank, use_container_width=True, height=360)
 
 # =========================
 # 明细展示
@@ -560,24 +507,24 @@ st.markdown("""
         border-radius: 10px;
         border-left: 5px solid #1e88e5;
     }
-    
+
     [data-testid="stMetricLabel"] {
         color: #666;
         font-size: 14px;
     }
-    
+
     [data-testid="stMetricValue"] {
         color: #1e88e5;
         font-size: 24px;
         font-weight: bold;
     }
-    
+
     /* 美化展开器 */
     .streamlit-expanderHeader {
         background-color: #f0f2f6;
         border-radius: 5px;
     }
-    
+
     /* 美化分隔线 */
     hr {
         margin: 2rem 0;
