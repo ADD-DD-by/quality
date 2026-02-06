@@ -91,7 +91,7 @@ with st.sidebar:
     extra_file = st.file_uploader("改进方案 / 其他数据", type=["xlsx", "xls"], key="extra")
 
 # =========================
-# 额外表展示（完全保留）
+# 额外表展示（保留）
 # =========================
 if extra_file is not None:
     extra_df = pd.read_excel(extra_file)
@@ -100,7 +100,7 @@ if extra_file is not None:
     st.divider()
 
 # =========================
-# 主数据读取
+# 主数据
 # =========================
 if main_file is None:
     st.warning("请先上传主数据")
@@ -124,7 +124,33 @@ c4.metric("款式数", df["erpsku款式名称"].nunique())
 st.divider()
 
 # =========================
-# 一级问题联动控制
+# ⭐ 款式风险识别表（你说缺的那张）
+# =========================
+st.subheader("🚨 款式风险识别表（按客诉率倒排）")
+
+tmp = df.copy()
+tmp["_pair"] = tmp["订单参考号"].astype(str) + "||" + tmp["erp sku"].astype(str)
+
+style_risk = (
+    tmp.groupby("erpsku款式名称", as_index=False)
+    .agg(
+        数量=("_pair", "nunique"),
+        问题数=("问题数", "sum")
+    )
+)
+
+style_risk["客诉率(%)"] = (
+    style_risk["问题数"] / style_risk["数量"] * 100
+).round(2)
+
+style_risk = style_risk.sort_values("客诉率(%)", ascending=False)
+
+st.dataframe(style_risk, use_container_width=True, height=420)
+
+st.divider()
+
+# =========================
+# 一级 → 二级 联动分析
 # =========================
 st.subheader("🎯 一级 → 二级问题联动分析")
 
