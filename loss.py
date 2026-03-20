@@ -1,21 +1,16 @@
+# streamlit run app.py
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 import statsmodels.api as sm
-from sklearn.linear_model import LinearRegression
 
-st.set_page_config(page_title="包装风险模型工具", layout="wide")
-st.title("📦 运损风险预测工具（稳定版）")
+st.set_page_config(page_title="运损风险预测工具（乘法模型）", layout="wide")
+st.title("📦 运损风险预测工具（乘法残差模型）")
 
 # =========================
-# 初始化
+# 全局配置
 # =========================
-if "models_dict" not in st.session_state:
-    st.session_state.models_dict = {}
-
-if "model_versions" not in st.session_state:
-    st.session_state.model_versions = []
-
 FEATURES = [
     "girth","dim_weight","density",
     "len_ratio","max_edge","min_edge",
@@ -23,6 +18,12 @@ FEATURES = [
 ]
 
 SEG_ORDER = ["small","medium","large"]
+
+# =========================
+# 初始化
+# =========================
+if "models_dict" not in st.session_state:
+    st.session_state.models_dict = {}
 
 # =========================
 # 工具函数
@@ -61,11 +62,10 @@ def base_rule(row):
     return score
 
 # =========================
-# 训练
+# 模型训练（乘法🔥）
 # =========================
 def train_model(df):
 
-    # ✅ 固定排序（关键）
     df = df.sort_values(["L","W","H","weight"]).reset_index(drop=True)
 
     df = feature_engineering(df)
@@ -75,46 +75,39 @@ def train_model(df):
     df["rule_l"] = df["rule_c"] + (df["weight"] > 30) * 0.01
 
     models_dict = {}
-    model_info = []
+    info = []
 
     for seg in SEG_ORDER:
 
         sub = df[df["segment"] == seg].copy()
-
         if len(sub) < 5:
             continue
 
         X = sm.add_constant(sub[FEATURES])
 
-        sub["residual_c"] = sub["complaint_rate"] - sub["rule_c"]
-        sub["residual_l"] = sub["loss_rate"] - sub["rule_l"]
+        # 学倍率
+        sub["ratio_c"] = sub["complaint_rate"] / (sub["rule_c"] + 1e-6)
+        sub["ratio_l"] = sub["loss_rate"] / (sub["rule_l"] + 1e-6)
 
-        model_c = sm.OLS(sub["residual_c"], X).fit()
-        model_l = sm.OLS(sub["residual_l"], X).fit()
+        sub["ratio_c"] = np.clip(sub["ratio_c"], 0.1, 5)
+        sub["ratio_l"] = np.clip(sub["ratio_l"], 0.1, 5)
 
-        sub["model_c"] = model_c.predict(X)
-        sub["model_l"] = model_l.predict(X)
+        model_c = sm.OLS(sub["ratio_c"], X).fit()
+        model_l = sm.OLS(sub["ratio_l"], X).fit()
 
-        fusion_input_c = np.vstack([sub["rule_c"], sub["model_c"]]).T
-        fusion_input_l = np.vstack([sub["rule_l"], sub["model_l"]]).T
+        models_dict[seg] = (model_c, model_l)
 
-        fusion_model_c = LinearRegression().fit(fusion_input_c, sub["complaint_rate"])
-        fusion_model_l = LinearRegression().fit(fusion_input_l, sub["loss_rate"])
-
-        models_dict[seg] = (model_c, model_l, fusion_model_c, fusion_model_l)
-
-        model_info.append({
+        info.append({
             "segment": seg,
-            "客诉_rule权重": fusion_model_c.coef_[0],
-            "客诉_model权重": fusion_model_c.coef_[1],
-            "资损_rule权重": fusion_model_l.coef_[0],
-            "资损_model权重": fusion_model_l.coef_[1],
+            "样本数": len(sub),
+            "客诉倍率均值": sub["ratio_c"].mean(),
+            "资损倍率均值": sub["ratio_l"].mean()
         })
 
-    return models_dict, pd.DataFrame(model_info)
+    return models_dict, pd.DataFrame(info)
 
 # =========================
-# 预测（完全对齐训练🔥）
+# 预测
 # =========================
 def predict(df, models_dict):
 
@@ -140,27 +133,28 @@ def predict(df, models_dict):
             sub["loss_pred"] = sub["rule_l"]
 
         else:
-            model_c, model_l, fusion_c, fusion_l = models_dict[seg]
+            model_c, model_l = models_dict[seg]
 
             X = sm.add_constant(sub[FEATURES])
 
-            sub["model_c"] = model_c.predict(X)
-            sub["model_l"] = model_l.predict(X)
+            ratio_c = model_c.predict(X)
+            ratio_l = model_l.predict(X)
 
-            fusion_input_c = np.vstack([sub["rule_c"], sub["model_c"]]).T
-            fusion_input_l = np.vstack([sub["rule_l"], sub["model_l"]]).T
+            # 防炸
+            ratio_c = np.clip(ratio_c, 0.1, 3)
+            ratio_l = np.clip(ratio_l, 0.1, 3)
 
-            sub["complaint_pred"] = fusion_c.predict(fusion_input_c)
-            sub["loss_pred"] = fusion_l.predict(fusion_input_l)
+            sub["complaint_pred"] = sub["rule_c"] * ratio_c
+            sub["loss_pred"] = sub["rule_l"] * ratio_l
 
         results.append(sub)
 
     return pd.concat(results)
 
 # =========================
-# UI
+# UI - 训练
 # =========================
-st.sidebar.header("📥 训练数据")
+st.sidebar.header("📥 训练模型")
 
 train_file = st.sidebar.file_uploader("上传训练数据", type=["xlsx"])
 
@@ -180,34 +174,22 @@ if train_file:
     df["complaint_rate"] = df["complaint_rate"].apply(parse)
     df["loss_rate"] = df["loss_rate"].apply(parse)
 
-    if st.button("🚀 训练模型"):
+    if st.button("🚀 开始训练"):
 
-        models_dict, model_info = train_model(df)
-
+        models_dict, info = train_model(df)
         st.session_state.models_dict = models_dict
-        st.session_state.model_versions.append(models_dict)
 
-        st.success("训练完成")
+        st.success("模型训练完成")
 
-        st.dataframe(model_info)
-
-# =========================
-# 回滚
-# =========================
-if st.sidebar.button("🔄 回滚"):
-    if len(st.session_state.model_versions) > 1:
-        st.session_state.model_versions.pop()
-        st.session_state.models_dict = st.session_state.model_versions[-1]
-        st.success("已回滚")
-    else:
-        st.warning("无历史版本")
+        st.subheader("📊 模型信息")
+        st.dataframe(info)
 
 # =========================
-# 预测
+# UI - 预测
 # =========================
-st.subheader("📤 预测")
+st.subheader("📤 上传预测数据")
 
-pred_file = st.file_uploader("上传预测数据", type=["xlsx"])
+pred_file = st.file_uploader("上传预测Excel", type=["xlsx"])
 
 if pred_file and st.session_state.models_dict:
 
@@ -226,7 +208,7 @@ if pred_file and st.session_state.models_dict:
     st.dataframe(result)
 
     st.download_button(
-        "下载结果",
+        "下载预测结果",
         result.to_csv(index=False),
         file_name="预测结果.csv"
     )
