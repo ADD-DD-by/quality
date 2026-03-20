@@ -5,7 +5,7 @@ import statsmodels.api as sm
 from sklearn.linear_model import LinearRegression
 
 st.set_page_config(page_title="包装风险模型工具", layout="wide")
-st.title("📦 运损风险预测工具（带模型管理）")
+st.title("📦 运损风险预测工具")
 
 # =========================
 # 初始化 session
