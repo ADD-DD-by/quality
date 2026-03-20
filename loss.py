@@ -235,7 +235,7 @@ if pred_file and st.session_state.models:
     result = predict(pred_df, st.session_state.models)
 
     output = result[[
-        "评估方案","L","W","H",
+        "评估方案","L","W","H","weight",
         "pred_c","pred_l"
     ]]
 
@@ -244,8 +244,6 @@ if pred_file and st.session_state.models:
     # 推荐方案
     output["score"] = 0.5*output["pred_c"] + 0.5*output["pred_l"]
     best = output.sort_values("score").iloc[0]
-
-    st.success(f"🏆 推荐方案：{best['评估方案']}")
 
     st.download_button(
         "下载预测结果",
