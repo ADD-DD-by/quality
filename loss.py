@@ -2,7 +2,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import statsmodels.api as sm
-#版本：体积 + 重量
+import os
+from datetime import datetime
+from io import BytesIO
+
 # =========================
 # 基础函数
 # =========================
@@ -16,7 +19,7 @@ def inv_logit(x):
 
 
 # =========================
-# 初始训练数据（体积 + 重量）
+# 初始数据
 # =========================
 data = [
     [100*70*10.5, 21.9, 0.0181, 0.0581],
@@ -29,22 +32,46 @@ data = [
     [200*75*6,   30.55, 0.0405, 0.1148],
 ]
 
-cols = [
-    "V",              # 体积
-    "weight",         # 重量
-    "loss_rate",      # 资损率
-    "complaint_rate", # 客诉率
-]
-
+cols = ["V", "weight", "loss_rate", "complaint_rate"]
 FEATURE_COLS = ["V", "weight"]
 
+# =========================
+# 版本管理路径
+# =========================
+DATA_DIR = "data"
+HISTORY_DIR = os.path.join(DATA_DIR, "history")
+
+os.makedirs(HISTORY_DIR, exist_ok=True)
 
 # =========================
-# Session State
+# 数据读写
+# =========================
+def load_data():
+    path = os.path.join(DATA_DIR, "current.csv")
+    if os.path.exists(path):
+        return pd.read_csv(path)
+    else:
+        df = pd.DataFrame(data, columns=cols)
+        df["V"] = df["V"] / 1000
+        return df
+
+def save_data(df):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # 保存历史版本
+    history_path = os.path.join(HISTORY_DIR, f"train_{timestamp}.csv")
+    df.to_csv(history_path, index=False)
+
+    # 保存当前版本
+    current_path = os.path.join(DATA_DIR, "current.csv")
+    df.to_csv(current_path, index=False)
+
+
+# =========================
+# Session 初始化
 # =========================
 if "train_df" not in st.session_state:
-    df = pd.DataFrame(data, columns=cols)
-    st.session_state.train_df = df.copy()
+    st.session_state.train_df = load_data()
 
 
 # =========================
@@ -61,132 +88,156 @@ def train_complaint_model(df):
     return sm.OLS(y, X).fit()
 
 
-loss_model = train_loss_model(st.session_state.train_df)
-complaint_model = train_complaint_model(st.session_state.train_df)
-
-
 # =========================
 # 页面
 # =========================
 st.set_page_config(page_title="包装运损风险评估工具", layout="centered")
 st.title("📦 包装运损风险评估工具")
 
-st.caption(
-    f"当前训练样本数量：**{len(st.session_state.train_df)} 条** ｜ "
-    "模型特征：体积 + 重量（Logit-OLS）"
-)
+st.caption(f"当前训练样本：{len(st.session_state.train_df)} 条")
 
+# =========================
+# 模型训练 & 系数展示
+# =========================
+loss_model = train_loss_model(st.session_state.train_df)
+complaint_model = train_complaint_model(st.session_state.train_df)
+
+st.subheader("📊 当前模型系数")
+
+coef_df = pd.DataFrame({
+    "变量": loss_model.params.index,
+    "资损率模型系数": loss_model.params.values,
+    "客诉率模型系数": complaint_model.params.values
+})
+
+st.dataframe(coef_df)
+
+
+# =========================
+# 单条预测
+# =========================
 st.divider()
-
-
-# =========================
-# 输入区
-# =========================
-st.subheader("📖 输入待评估的包装方案")
+st.subheader("📖 单条评估")
 
 col1, col2 = st.columns(2)
 with col1:
-    L = st.number_input("长 (cm)", value=160.0)
-    W = st.number_input("宽 (cm)", value=75.0)
+    L = st.number_input("长", value=160.0)
+    W = st.number_input("宽", value=75.0)
 with col2:
-    H = st.number_input("高 (cm)", value=7.0)
-    weight = st.number_input("重量 (kg)", value=27.0)
+    H = st.number_input("高", value=7.0)
+    weight = st.number_input("重量", value=27.0)
 
+if st.button("🔍 评估"):
 
-if st.button("🔍 评估运损风险", use_container_width=True):
+    V = (L * W * H) / 1000
 
-    V = L * W * H
+    X = pd.DataFrame([{"const":1,"V":V,"weight":weight}])
 
-    X_new = pd.DataFrame([{
-        "const": 1,
-        "V": V,
-        "weight": weight
-    }])
+    loss = inv_logit(loss_model.predict(X)[0])
+    complaint = inv_logit(complaint_model.predict(X)[0])
 
-    pred_loss = inv_logit(loss_model.predict(X_new)[0])
-    pred_complaint = inv_logit(complaint_model.predict(X_new)[0])
-
-    # 业务规则（非模型）
-    girth = L + 2 * (W + H)
-    len_ratio = L / girth
-
-    if pred_loss < 0.015:
-        level = "🟢 低风险"
-    elif pred_loss < 0.03:
-        level = "🟡 中风险"
-    else:
-        level = "🔴 高风险"
-
-    st.subheader("✨ 评估结果")
-    st.metric("预测运损资损率", f"{pred_loss*100:.2f}%")
-    st.metric("预测运损客诉率（辅助）", f"{pred_complaint*100:.2f}%")
-    st.markdown(f"**风险等级：{level}**")
-
-    st.info(
-        "结构风险提示："
-        + (" 围长偏大；" if girth >= 330 else "")
-        + (" 重量偏高；" if weight >= 25 else "")
-        + (" 结构偏细长" if len_ratio >= 0.45 else " 结构整体可控")
-    )
+    st.metric("资损率", f"{loss*100:.2f}%")
+    st.metric("客诉率", f"{complaint*100:.2f}%")
 
 
 # =========================
-# 模型解释
-# =========================
-with st.expander("📊 模型系数解释（资损率模型）"):
-    coef = loss_model.params
-
-    st.caption("注：模型在 logit 空间训练，系数表示对风险对数几率的影响")
-
-    st.markdown(
-        f"""
-- **体积系数：{coef['V']:.6f}**  
-  → 包装越大，运输过程中的系统性风险越高  
-
-- **重量系数：{coef['weight']:.3f}**  
-  → 包装越重，一旦发生破损，资损程度越高
-        """
-    )
-
-
-# =========================
-# 新增训练数据
+# 上传训练数据
 # =========================
 st.divider()
-st.subheader("➕ 新增训练样本")
+st.subheader("📤 上传训练数据")
 
-with st.form("add_train"):
-    t_L = st.number_input("长(cm)", value=150.0)
-    t_W = st.number_input("宽(cm)", value=75.0)
-    t_H = st.number_input("高(cm)", value=7.0)
-    t_weight = st.number_input("重量(kg)", value=25.0)
-    t_loss = st.number_input("资损率(0-1)", value=0.02)
-    t_complaint = st.number_input("客诉率(0-1)", value=0.05)
+file = st.file_uploader("上传训练数据", type=["xlsx"])
 
-    if st.form_submit_button("📥 添加并重训"):
-        t_V = t_L * t_W * t_H
+if file and st.button("导入训练数据"):
 
-        new_row = {
-            "V": t_V,
-            "weight": t_weight,
-            "loss_rate": t_loss,
-            "complaint_rate": t_complaint,
-        }
+    df = pd.read_excel(file)
 
-        st.session_state.train_df = pd.concat(
-            [st.session_state.train_df, pd.DataFrame([new_row])],
-            ignore_index=True
-        )
+    df = df.rename(columns={
+        "产品-长":"L","产品-宽":"W","包装-高":"H",
+        "包装-重":"weight",
+        "运损资损率":"loss_rate",
+        "运损客诉率":"complaint_rate"
+    })
 
-        st.success(f"样本已添加，总数：{len(st.session_state.train_df)}")
-        st.experimental_rerun()
+    def parse(x):
+        if isinstance(x,str) and "%" in x:
+            return float(x.replace("%",""))/100
+        return float(x)
+
+    df["loss_rate"] = df["loss_rate"].apply(parse)
+    df["complaint_rate"] = df["complaint_rate"].apply(parse)
+
+    df["V"] = (df["L"]*df["W"]*df["H"])/1000
+    df = df[["V","weight","loss_rate","complaint_rate"]]
+
+    st.session_state.train_df = pd.concat(
+        [st.session_state.train_df, df], ignore_index=True
+    )
+
+    save_data(st.session_state.train_df)
+
+    st.success("导入成功")
+
+
+# =========================
+# 批量预测
+# =========================
+st.divider()
+st.subheader("📊 批量预测")
+
+file2 = st.file_uploader("上传预测数据", type=["xlsx"], key="pred")
+
+if file2 and st.button("开始预测"):
+
+    df = pd.read_excel(file2)
+
+    df = df.rename(columns={
+        "长":"L","宽":"W","高":"H","重量":"weight"
+    })
+
+    df["V"] = (df["L"]*df["W"]*df["H"])/1000
+
+    X = sm.add_constant(df[["V","weight"]])
+
+    df["预测资损率"] = inv_logit(loss_model.predict(X))
+    df["预测客诉率"] = inv_logit(complaint_model.predict(X))
+
+    st.dataframe(df)
+
+    buffer = BytesIO()
+    df.to_excel(buffer,index=False)
+
+    st.download_button("下载结果", buffer.getvalue(), "预测结果.xlsx")
+
+
+# =========================
+# 版本管理
+# =========================
+st.divider()
+st.subheader("🕘 历史版本")
+
+files = sorted(os.listdir(HISTORY_DIR), reverse=True)
+
+if files:
+    f = st.selectbox("选择版本", files)
+
+    if st.button("回滚"):
+        df = pd.read_csv(os.path.join(HISTORY_DIR, f))
+        st.session_state.train_df = df
+        save_data(df)
+        st.success("已回滚")
+
+
+# =========================
+# 下载当前训练数据
+# =========================
+buffer = BytesIO()
+st.session_state.train_df.to_excel(buffer,index=False)
+
+st.download_button("📥 下载当前训练数据", buffer.getvalue(), "train_data.xlsx")
 
 
 # =========================
 # 声明
 # =========================
-st.divider()
-st.caption(
-    "⚠️ 本工具用于评估包装方案在不同体积与重量条件下的**相对资损/运损风险**，"
-    "不用于精确预测单一订单的实际损失。"
-)
+st.caption("⚠️ 模型用于相对风险评估")
