@@ -5,16 +5,24 @@ import statsmodels.api as sm
 from sklearn.linear_model import LinearRegression
 
 st.set_page_config(page_title="包装风险模型工具", layout="wide")
-st.title("📦 运损风险预测工具")
+st.title("📦 运损风险预测工具（稳定版）")
 
 # =========================
-# 初始化 session
+# 初始化
 # =========================
 if "models_dict" not in st.session_state:
     st.session_state.models_dict = {}
 
 if "model_versions" not in st.session_state:
     st.session_state.model_versions = []
+
+FEATURES = [
+    "girth","dim_weight","density",
+    "len_ratio","max_edge","min_edge",
+    "is_large","is_heavy"
+]
+
+SEG_ORDER = ["small","medium","large"]
 
 # =========================
 # 工具函数
@@ -53,9 +61,12 @@ def base_rule(row):
     return score
 
 # =========================
-# 模型训练
+# 训练
 # =========================
 def train_model(df):
+
+    # ✅ 固定排序（关键）
+    df = df.sort_values(["L","W","H","weight"]).reset_index(drop=True)
 
     df = feature_engineering(df)
     df["segment"] = df["L"].apply(segment)
@@ -66,19 +77,14 @@ def train_model(df):
     models_dict = {}
     model_info = []
 
-    for seg in df["segment"].unique():
+    for seg in SEG_ORDER:
 
         sub = df[df["segment"] == seg].copy()
+
         if len(sub) < 5:
             continue
 
-        features = [
-            "girth","dim_weight","density",
-            "len_ratio","max_edge","min_edge",
-            "is_large","is_heavy"
-        ]
-
-        X = sm.add_constant(sub[features])
+        X = sm.add_constant(sub[FEATURES])
 
         sub["residual_c"] = sub["complaint_rate"] - sub["rule_c"]
         sub["residual_l"] = sub["loss_rate"] - sub["rule_l"]
@@ -108,9 +114,11 @@ def train_model(df):
     return models_dict, pd.DataFrame(model_info)
 
 # =========================
-# 预测函数
+# 预测（完全对齐训练🔥）
 # =========================
 def predict(df, models_dict):
+
+    df = df.sort_values(["L","W","H","weight"]).reset_index(drop=True)
 
     df = feature_engineering(df)
     df["segment"] = df["L"].apply(segment)
@@ -118,25 +126,23 @@ def predict(df, models_dict):
     df["rule_c"] = df.apply(base_rule, axis=1)
     df["rule_l"] = df["rule_c"] + (df["weight"] > 30) * 0.01
 
-    features = [
-        "girth","dim_weight","density",
-        "len_ratio","max_edge","min_edge",
-        "is_large","is_heavy"
-    ]
-
     results = []
 
-    for seg in df["segment"].unique():
+    for seg in SEG_ORDER:
 
         sub = df[df["segment"] == seg].copy()
+
+        if len(sub) == 0:
+            continue
 
         if seg not in models_dict:
             sub["complaint_pred"] = sub["rule_c"]
             sub["loss_pred"] = sub["rule_l"]
+
         else:
             model_c, model_l, fusion_c, fusion_l = models_dict[seg]
 
-            X = sm.add_constant(sub[features])
+            X = sm.add_constant(sub[FEATURES])
 
             sub["model_c"] = model_c.predict(X)
             sub["model_l"] = model_l.predict(X)
@@ -152,9 +158,10 @@ def predict(df, models_dict):
     return pd.concat(results)
 
 # =========================
-# 📥 训练数据上传
+# UI
 # =========================
-st.sidebar.header("📥 上传训练数据")
+st.sidebar.header("📥 训练数据")
+
 train_file = st.sidebar.file_uploader("上传训练数据", type=["xlsx"])
 
 if train_file:
@@ -180,29 +187,27 @@ if train_file:
         st.session_state.models_dict = models_dict
         st.session_state.model_versions.append(models_dict)
 
-        st.success("模型训练完成")
+        st.success("训练完成")
 
-        st.subheader("📊 模型参数说明")
         st.dataframe(model_info)
 
 # =========================
-# 🔄 回滚
+# 回滚
 # =========================
-st.sidebar.subheader("🔄 模型回滚")
-
-if st.sidebar.button("回滚上一个版本"):
+if st.sidebar.button("🔄 回滚"):
     if len(st.session_state.model_versions) > 1:
         st.session_state.model_versions.pop()
         st.session_state.models_dict = st.session_state.model_versions[-1]
         st.success("已回滚")
     else:
-        st.warning("没有可回滚版本")
+        st.warning("无历史版本")
 
 # =========================
-# 📤 预测
+# 预测
 # =========================
-st.subheader("📤 上传预测数据")
-pred_file = st.file_uploader("上传需要预测的Excel", type=["xlsx"])
+st.subheader("📤 预测")
+
+pred_file = st.file_uploader("上传预测数据", type=["xlsx"])
 
 if pred_file and st.session_state.models_dict:
 
@@ -221,7 +226,7 @@ if pred_file and st.session_state.models_dict:
     st.dataframe(result)
 
     st.download_button(
-        "下载预测结果",
+        "下载结果",
         result.to_csv(index=False),
         file_name="预测结果.csv"
     )
