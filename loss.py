@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import statsmodels.api as sm
 
-st.set_page_config(page_title="运损风险预测工具（乘法模型）", layout="wide")
+st.set_page_config(page_title="运损风险预测工具", layout="wide")
 st.title("📦 运损风险预测工具（乘法残差模型）")
 
 # =========================
@@ -17,6 +17,7 @@ FEATURES = [
     "is_large","is_heavy"
 ]
 
+MODEL_COLUMNS = ["const"] + FEATURES
 SEG_ORDER = ["small","medium","large"]
 
 # =========================
@@ -32,6 +33,17 @@ def parse(x):
     if isinstance(x, str) and "%" in x:
         return float(x.replace("%","")) / 100
     return float(x)
+
+def build_X(df):
+    df = df.copy()
+    df["const"] = 1.0
+
+    # 防止缺列
+    for col in MODEL_COLUMNS:
+        if col not in df.columns:
+            df[col] = 0
+
+    return df[MODEL_COLUMNS]
 
 def feature_engineering(df):
     df["V"] = df["L"] * df["W"] * df["H"]
@@ -61,8 +73,27 @@ def base_rule(row):
     if row["weight"] > 30: score += 0.01
     return score
 
+def preprocess_pred_df(df):
+    df = df.rename(columns={
+        "产品-长": "L",
+        "产品-宽": "W",
+        "包装-高": "H",
+        "包装-重": "weight",
+        "围长": "girth"
+    })
+
+    if "评估方案" not in df.columns:
+        df["评估方案"] = "默认方案"
+
+    numeric_cols = ["L","W","H","weight","girth"]
+    for col in numeric_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    df = df.dropna(subset=numeric_cols)
+    return df
+
 # =========================
-# 模型训练（乘法🔥）
+# 训练模型（乘法🔥）
 # =========================
 def train_model(df):
 
@@ -75,7 +106,6 @@ def train_model(df):
     df["rule_l"] = df["rule_c"] + (df["weight"] > 30) * 0.01
 
     models_dict = {}
-    info = []
 
     for seg in SEG_ORDER:
 
@@ -83,9 +113,8 @@ def train_model(df):
         if len(sub) < 5:
             continue
 
-        X = sm.add_constant(sub[FEATURES])
+        X = build_X(sub)
 
-        # 学倍率
         sub["ratio_c"] = sub["complaint_rate"] / (sub["rule_c"] + 1e-6)
         sub["ratio_l"] = sub["loss_rate"] / (sub["rule_l"] + 1e-6)
 
@@ -97,14 +126,7 @@ def train_model(df):
 
         models_dict[seg] = (model_c, model_l)
 
-        info.append({
-            "segment": seg,
-            "样本数": len(sub),
-            "客诉倍率均值": sub["ratio_c"].mean(),
-            "资损倍率均值": sub["ratio_l"].mean()
-        })
-
-    return models_dict, pd.DataFrame(info)
+    return models_dict
 
 # =========================
 # 预测
@@ -124,23 +146,20 @@ def predict(df, models_dict):
     for seg in SEG_ORDER:
 
         sub = df[df["segment"] == seg].copy()
-
         if len(sub) == 0:
             continue
 
         if seg not in models_dict:
             sub["complaint_pred"] = sub["rule_c"]
             sub["loss_pred"] = sub["rule_l"]
-
         else:
             model_c, model_l = models_dict[seg]
 
-            X = sm.add_constant(sub[FEATURES])
+            X = build_X(sub)
 
             ratio_c = model_c.predict(X)
             ratio_l = model_l.predict(X)
 
-            # 防炸
             ratio_c = np.clip(ratio_c, 0.1, 3)
             ratio_l = np.clip(ratio_l, 0.1, 3)
 
@@ -174,15 +193,9 @@ if train_file:
     df["complaint_rate"] = df["complaint_rate"].apply(parse)
     df["loss_rate"] = df["loss_rate"].apply(parse)
 
-    if st.button("🚀 开始训练"):
-
-        models_dict, info = train_model(df)
-        st.session_state.models_dict = models_dict
-
+    if st.button("🚀 训练模型"):
+        st.session_state.models_dict = train_model(df)
         st.success("模型训练完成")
-
-        st.subheader("📊 模型信息")
-        st.dataframe(info)
 
 # =========================
 # UI - 预测
@@ -194,21 +207,26 @@ pred_file = st.file_uploader("上传预测Excel", type=["xlsx"])
 if pred_file and st.session_state.models_dict:
 
     pred_df = pd.read_excel(pred_file)
-
-    pred_df = pred_df.rename(columns={
-        "产品-长": "L",
-        "产品-宽": "W",
-        "包装-高": "H",
-        "包装-重": "weight",
-        "围长": "girth"
-    })
+    pred_df = preprocess_pred_df(pred_df)
 
     result = predict(pred_df, st.session_state.models_dict)
 
-    st.dataframe(result)
+    output = result[[
+        "评估方案",
+        "L","W","H","weight","girth",
+        "complaint_pred","loss_pred"
+    ]]
+
+    st.dataframe(output)
+
+    # ✅ 最优方案
+    output["score"] = 0.5*output["complaint_pred"] + 0.5*output["loss_pred"]
+    best = output.sort_values("score").iloc[0]
+
+    st.success(f"🏆 推荐方案：{best['评估方案']}")
 
     st.download_button(
-        "下载预测结果",
-        result.to_csv(index=False),
+        "下载结果",
+        output.to_csv(index=False),
         file_name="预测结果.csv"
     )
