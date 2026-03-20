@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import statsmodels.api as sm
-
+# 版本：体积 + 重量 + 重量/围长
 # =========================
 # 基础函数
 # =========================
