@@ -8,9 +8,8 @@ st.set_page_config(page_title="包装风险评估工具", layout="wide")
 st.title("📦 包装风险评估工具（客诉率 & 资损率）")
 
 # =========================
-# 1️⃣ 读取模型（你需要先训练一次保存coef）
+# 1️⃣ 训练模型（自动缓存）
 # =========================
-
 @st.cache_data
 def load_model():
     df = pd.read_excel("运损对比.xlsx")
@@ -36,7 +35,9 @@ def load_model():
     df["claim_rate"] = df["claim_rate"].apply(parse_percent)
     df["loss_rate"] = df["loss_rate"].apply(parse_percent)
 
-    # 特征
+    # =========================
+    # 特征工程（核心）
+    # =========================
     df["log_girth"] = np.log(df["girth"])
     df["log_weight"] = np.log(df["weight"])
     df["log_H"] = np.log(df["H"])
@@ -47,12 +48,12 @@ def load_model():
     df["weight_excess_30"] = np.maximum(0, df["weight"] - 30)
     df["weight_excess_40"] = np.maximum(0, df["weight"] - 40)
 
+    # ⭐ 包装影响
     df["girth_pack_penalty"] = df["girth_excess_300"] * df["pack_coef"]
-    # =========================
-# ⭐ 新增补偿特征（核心）
-# =========================
 
+    # ⭐ 大围长补偿（由模型学习）
     df["girth_comp"] = np.log1p(np.maximum(0, df["girth"] - 350)) * df["pack_coef"]
+
     FEATURES = [
         "log_girth","log_weight","log_H","pack_coef",
         "girth_excess_260","girth_excess_300",
@@ -71,17 +72,14 @@ def load_model():
 coef_claim, coef_loss = load_model()
 
 # =========================
-# 2️⃣ 核心预测函数
+# 2️⃣ 核心预测函数（最终稳定版）
 # =========================
 def predict_row(row, coef):
-    girth = row["girth"]
-    weight = row["weight"]
-    H = row["H"]
+    girth = max(row["girth"], 1)
+    weight = max(row["weight"], 1)
+    H = max(row["H"], 1)
     pack = row["pack_coef"]
 
-    # =========================
-    # 原模型（完全不动！！）
-    # =========================
     val = (
         coef['const']
         + coef['log_girth'] * np.log(girth)
@@ -93,13 +91,11 @@ def predict_row(row, coef):
         + coef['weight_excess_30'] * max(0, weight-30)
         + coef['weight_excess_40'] * max(0, weight-40)
         + coef['girth_pack_penalty'] * max(0, girth-300) * pack
-        + coef['girth_comp'] * np.log1p(max(0, girth-400)) * pack
+        + coef['girth_comp'] * np.log1p(max(0, girth-350)) * pack
     )
 
-
-
-    # 保留你原来的clip（保证训练数据一致）
-    return np.clip(pred, 0, 0.5)
+    # ⭐ 保底 + 上限
+    return np.clip(val, 0.002, 0.5)
 
 # =========================
 # 3️⃣ 单条预测
@@ -145,7 +141,7 @@ if st.button("计算风险"):
 # =========================
 # 4️⃣ 批量预测
 # =========================
-st.subheader("🔹 批量预测（上传Excel,数据表列名：包装长、包装宽、包装高、包装重、围长、包装系数）")
+st.subheader("🔹 批量预测（上传Excel）")
 
 file = st.file_uploader("上传数据", type=["xlsx"])
 
