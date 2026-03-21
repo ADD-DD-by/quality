@@ -48,12 +48,16 @@ def load_model():
     df["weight_excess_40"] = np.maximum(0, df["weight"] - 40)
 
     df["girth_pack_penalty"] = df["girth_excess_300"] * df["pack_coef"]
+    # =========================
+# ⭐ 新增补偿特征（核心）
+# =========================
 
+    df["girth_comp"] = np.log1p(np.maximum(0, df["girth"] - 350)) * df["pack_coef"]
     FEATURES = [
         "log_girth","log_weight","log_H","pack_coef",
         "girth_excess_260","girth_excess_300",
         "weight_excess_30","weight_excess_40",
-        "girth_pack_penalty"
+        "girth_pack_penalty","girth_comp"
     ]
 
     X = sm.add_constant(df[FEATURES])
@@ -89,6 +93,7 @@ def predict_row(row, coef):
         + coef['weight_excess_30'] * max(0, weight-30)
         + coef['weight_excess_40'] * max(0, weight-40)
         + coef['girth_pack_penalty'] * max(0, girth-300) * pack
+        + coef['girth_comp'] * np.log1p(max(0, girth-400)) * pack
     )
 
     # =========================
