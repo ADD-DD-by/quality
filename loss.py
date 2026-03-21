@@ -115,7 +115,7 @@ def predict_row(row, coef):
 # 3️⃣ 单条预测
 # =========================
 st.subheader("🔹 单条预测")
-
+st.subheader("🔹 上传数据表列名：包装长、包装宽、包装高、包装重、围长、包装系数")
 col1, col2, col3, col4 = st.columns(4)
 
 L = col1.number_input("包装长", value=120.0)
