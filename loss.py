@@ -96,12 +96,7 @@ def predict_row(row, coef):
         + coef['girth_comp'] * np.log1p(max(0, girth-400)) * pack
     )
 
-    # ======================
 
-    # =========================
-    # 最终结果
-    # =========================
-    pred = val + compensation
 
     # 保留你原来的clip（保证训练数据一致）
     return np.clip(pred, 0, 0.5)
