@@ -96,17 +96,7 @@ def predict_row(row, coef):
         + coef['girth_comp'] * np.log1p(max(0, girth-400)) * pack
     )
 
-    # =========================
-    # ⭐ 新增：大围长补偿（关键！！）
-    # =========================
-    compensation = 0
-
-    if girth > 350:
-        compensation = (
-            0.0008
-            * np.log1p(girth - 350)
-            * (pack ** 1.5)   # 放大包装影响
-        )
+    # ======================
 
     # =========================
     # 最终结果
